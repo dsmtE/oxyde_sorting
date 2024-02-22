@@ -1,0 +1,30 @@
+[package]
+name = "rusty_boids"
+version = "0.0.1"
+authors = ["DE SMET Enguerrand"]
+edition = "2021"
+
+[workspace]
+members = ["crates/*"]
+
+[dependencies]
+oxyde = {git = 'https://github.com/dsmtE/oxyde', features = ["log"]}
+
+# nalgebra-glm = { version = "0.18", features = [ "convert-bytemuck" ] }
+
+# Overriding repository URL to work with git submodules
+[patch."https://github.com/dsmtE/oxyde"]
+oxyde = { path = "crates/oxyde" }
+
+[[bin]]
+name = "rusty_boids"
+path = "src/main.rs"
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+strip = true
+opt-level = 3
+lto = true
+codegen-units = 1
