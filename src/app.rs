@@ -5,7 +5,7 @@ use oxyde::{
     wgpu_utils::{
         binding_builder,
         buffers,
-        wgsl_preprocessor::WGSLShaderBuilder,
+        ShaderComposer,
     },
     winit::event::Event,
     AppState,
@@ -48,7 +48,8 @@ impl oxyde::App for App {
                 .create(device, Some("init random value bind_group"));
 
         let init_random_pipeline = {
-            let source = WGSLShaderBuilder::new(include_str!("../shaders/init_random.wgsl").into())
+            let source_naga_module = ShaderComposer::new(include_str!("../shaders/init_random.wgsl").into(), Some("init random"))
+                .add_shader_define("WORKGROUP_SIZE", 64.into())
                 .build()
                 .unwrap();
 
@@ -61,7 +62,7 @@ impl oxyde::App for App {
                 })),
                 module: &device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some("init random value shader"),
-                    source,
+                    source : wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(source_naga_module)),
                 }),
                 entry_point: "main",
             })

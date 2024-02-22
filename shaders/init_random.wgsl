@@ -7,8 +7,7 @@ fn rand_u(seed: u32) -> u32 {
     return (h >> 22u) ^ h;
 }
 
-// TODO: use string replacement and shader builder for replacing hard coded workgroup_size
-@compute @workgroup_size(64)
+@compute @workgroup_size(#WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) GlobalInvocationID : vec3<u32>) {
     let total = arrayLength(&values);
     let index: u32 = GlobalInvocationID.x;

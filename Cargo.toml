@@ -8,7 +8,7 @@ edition = "2021"
 members = ["crates/*"]
 
 [dependencies]
-oxyde = {git = 'https://github.com/dsmtE/oxyde', features = ["log"]}
+oxyde = {git = 'https://github.com/dsmtE/oxyde', features = ["log", "naga"]}
 
 # nalgebra-glm = { version = "0.18", features = [ "convert-bytemuck" ] }
 
