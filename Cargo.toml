@@ -11,6 +11,7 @@ members = ["crates/*"]
 oxyde = {git = 'https://github.com/dsmtE/oxyde', features = ["log", "naga"]}
 
 # nalgebra-glm = { version = "0.18", features = [ "convert-bytemuck" ] }
+bytemuck = { version = "1.13", features = [ "derive" ] }
 
 # Overriding repository URL to work with git submodules
 [patch."https://github.com/dsmtE/oxyde"]

@@ -8,17 +8,25 @@ use oxyde::{
         binding_builder,
         buffers,
         ShaderComposer,
+        uniform_buffer::UniformBufferWrapper,
     },
     winit::event::Event,
     AppState,
 };
 
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Default)]
+#[repr(C)]
+struct Uniforms {
+    current_time_ms: u32,
+}
 
 const WORKGROUP_SIZE: u32 = 64;
 
 pub struct App {
     size: u32,
     do_sorting: bool,
+
+    uniforms_buffer: UniformBufferWrapper<Uniforms>,
 
     value_buffer: wgpu::Buffer,
     count_buffer: wgpu::Buffer,
@@ -47,6 +55,8 @@ impl oxyde::App for App {
         let value_staging_buffer = buffers::StagingBufferWrapper::new(device, size as _);
         let count_staging_buffer = buffers::StagingBufferWrapper::new(device, size as _);
 
+        let uniforms_buffer = UniformBufferWrapper::new(device, Uniforms::default(), wgpu::ShaderStages::COMPUTE);
+
         let init_random_value_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
                 .add_binding_compute(wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -69,7 +79,7 @@ impl oxyde::App for App {
                 label: Some("init random value pipeline"),
                 layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("init random value pipeline layout"),
-                    bind_group_layouts: &[&init_random_value_bind_group_layout_with_desc.layout],
+                    bind_group_layouts: &[&init_random_value_bind_group_layout_with_desc.layout, uniforms_buffer.layout()],
                     push_constant_ranges: &[],
                 })),
                 module: &device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -136,6 +146,7 @@ impl oxyde::App for App {
         Self {
             size,
             do_sorting: true,
+            uniforms_buffer,
             value_buffer,
             count_buffer,
             value_staging_buffer,
@@ -165,6 +176,9 @@ impl oxyde::App for App {
         if self.do_sorting {
             println!("do sorting");
 
+            self.uniforms_buffer.content_mut().current_time_ms = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u32;
+            self.uniforms_buffer.update_content(&app_state.queue);
+
             let mut compute_encoder: wgpu::CommandEncoder = app_state
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Sorting Encoder") });
@@ -175,6 +189,7 @@ impl oxyde::App for App {
                 let workgroup_size_x = self.size as u32/WORKGROUP_SIZE;
                 compute_pass.set_pipeline(&self.init_random_pipeline);
                 compute_pass.set_bind_group(0, &self.init_random_value_bind_group, &[]);
+                compute_pass.set_bind_group(1, &self.uniforms_buffer.bind_group(), &[]);
                 compute_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
 
                 compute_pass.set_pipeline(&self.reset_pipeline);
