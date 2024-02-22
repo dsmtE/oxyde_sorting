@@ -14,5 +14,5 @@ fn main(@builtin(global_invocation_id) GlobalInvocationID : vec3<u32>) {
     if (index >= total) { return; }
 
     // values[index] = index;
-    values[index] = rand_u(index) % 1000;
+    values[index] = rand_u(index) % total;
 }
