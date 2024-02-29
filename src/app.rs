@@ -33,12 +33,15 @@ pub struct App {
 
     value_staging_buffer: buffers::StagingBufferWrapper<u32, true>,
     count_staging_buffer: buffers::StagingBufferWrapper<u32, true>,
+
     init_random_value_bind_group: wgpu::BindGroup,
     counting_bind_group: wgpu::BindGroup,
+    scan_bind_group: wgpu::BindGroup,
 
     init_random_pipeline: wgpu::ComputePipeline,
     counting_pipeline: wgpu::ComputePipeline,
     reset_pipeline: wgpu::ComputePipeline,
+    scan_pipeline: wgpu::ComputePipeline,
 }
 
 impl oxyde::App for App {
@@ -46,7 +49,7 @@ impl oxyde::App for App {
 
         let device = &_app_state.device;
 
-        let size = 16384u32;
+        let size = 1024u32;
         let buffer_size = size * std::mem::size_of::<u32>() as u32;
         
         let value_buffer = buffers::create_buffer_for_size(device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, Some("value buffer"), buffer_size as _);
@@ -141,7 +144,37 @@ impl oxyde::App for App {
             module: &counting_shader_module,
             entry_point: "reset",
         });
-    
+
+        let scan_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
+            .add_binding_compute(wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            })
+            .create(device, None);
+
+        let scan_bind_group = binding_builder::BindGroupBuilder::new(&scan_bind_group_layout_with_desc)
+            .resource(count_buffer.as_entire_binding())
+            .create(device, Some("scan bind_group"));
+            
+        let scan_naga_module = ShaderComposer::new(include_str!("../shaders/scan.wgsl").into(), Some("scan"))
+            .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
+            .build()
+            .unwrap();
+        
+        let scan_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("scan pipeline"),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("scan pipeline layout"),
+                bind_group_layouts: &[&scan_bind_group_layout_with_desc.layout],
+                push_constant_ranges: &[],
+            })),
+            module: &device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("scan shader"),
+                source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(scan_naga_module)),
+            }),
+            entry_point: "workgroup_scan",
+        });
         
         Self {
             size,
@@ -153,9 +186,12 @@ impl oxyde::App for App {
             count_staging_buffer,
             init_random_value_bind_group,
             counting_bind_group,
+            scan_bind_group,
+            
             init_random_pipeline,
             counting_pipeline,
             reset_pipeline,
+            scan_pipeline,
         }
     }
 
@@ -199,6 +235,10 @@ impl oxyde::App for App {
                 compute_pass.set_pipeline(&self.counting_pipeline);
                 compute_pass.set_bind_group(0, &self.counting_bind_group, &[]);
                 compute_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
+
+                compute_pass.set_pipeline(&self.scan_pipeline);
+                compute_pass.set_bind_group(0, &self.scan_bind_group, &[]);
+                compute_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
             }
 
             self.value_staging_buffer.encode_read(&mut compute_encoder, &self.value_buffer);
@@ -230,8 +270,8 @@ impl oxyde::App for App {
             self.count_staging_buffer.read_and_unmap_buffer();
             
             if self.size <= 128 {
-                println!("values: {:?}", self.value_staging_buffer.values_as_slice());
-                println!("counts: {:?}", self.count_staging_buffer.values_as_slice());
+                println!("values      : {:?}", self.value_staging_buffer.values_as_slice());
+                println!("counts      : {:?}", self.count_staging_buffer.values_as_slice());
             }
 
             {
@@ -241,7 +281,19 @@ impl oxyde::App for App {
                     count_cpu[*value as usize] += 1;
                 }
 
-                println!("Count si valid: {}", count_cpu == self.count_staging_buffer.values_as_slice());
+                //scan on count_cpu using iterative method
+                for group_index in 0..(self.size/WORKGROUP_SIZE) {
+                    let offset = group_index * WORKGROUP_SIZE;
+                    for i in 1..WORKGROUP_SIZE {
+                        count_cpu[(offset + i) as usize] += count_cpu[(offset + i - 1) as usize];
+                    }
+                }
+
+                println!("counts scan : {:?}", count_cpu.as_slice());
+
+                println!("scan gpu    : {:?}", self.count_staging_buffer.values_as_slice());
+
+                println!("Count valid : {}", count_cpu == self.count_staging_buffer.values_as_slice());
             }
 
             self.do_sorting = false;
