@@ -20,7 +20,7 @@ struct Uniforms {
     current_time_ms: u32,
 }
 
-const WORKGROUP_SIZE: u32 = 64;
+const WORKGROUP_SIZE: u32 = 128;
 
 pub struct App {
     size: u32,
@@ -30,18 +30,24 @@ pub struct App {
 
     value_buffer: wgpu::Buffer,
     count_buffer: wgpu::Buffer,
+    sub_scan_buffer: wgpu::Buffer,
 
     value_staging_buffer: buffers::StagingBufferWrapper<u32, true>,
     count_staging_buffer: buffers::StagingBufferWrapper<u32, true>,
+    sub_scan_staging_buffer: buffers::StagingBufferWrapper<u32, true>,
 
     init_random_value_bind_group: wgpu::BindGroup,
     counting_bind_group: wgpu::BindGroup,
     scan_bind_group: wgpu::BindGroup,
+    sub_scan_bind_group: wgpu::BindGroup,
+    scan_sub_copy_bind_group: wgpu::BindGroup,
 
     init_random_pipeline: wgpu::ComputePipeline,
     counting_pipeline: wgpu::ComputePipeline,
     reset_pipeline: wgpu::ComputePipeline,
-    scan_pipeline: wgpu::ComputePipeline,
+    workgroup_scan_pipeline: wgpu::ComputePipeline,
+    copy_workgroup_scan_pipeline: wgpu::ComputePipeline,
+    workgroup_propagate_pipeline: wgpu::ComputePipeline,
 }
 
 impl oxyde::App for App {
@@ -49,14 +55,17 @@ impl oxyde::App for App {
 
         let device = &_app_state.device;
 
-        let size = 1024u32;
-        let buffer_size = size * std::mem::size_of::<u32>() as u32;
+        let size = 16384u32;
+        let size_of_u32 = std::mem::size_of::<u32>() as u64;
         
-        let value_buffer = buffers::create_buffer_for_size(device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, Some("value buffer"), buffer_size as _);
-        let count_buffer = buffers::create_buffer_for_size(device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, Some("sorting id buffer"), buffer_size as _);
+        let value_buffer = buffers::create_buffer_for_size(device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, Some("value buffer"), size as u64 * size_of_u32);
+        let count_buffer = buffers::create_buffer_for_size(device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, Some("sorting id buffer"), size as u64 * size_of_u32);
+
+        let sub_scan_buffer = buffers::create_buffer_for_size(device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, Some("sub scan buffer"), (size / WORKGROUP_SIZE) as u64 * size_of_u32);
 
         let value_staging_buffer = buffers::StagingBufferWrapper::new(device, size as _);
         let count_staging_buffer = buffers::StagingBufferWrapper::new(device, size as _);
+        let sub_scan_staging_buffer = buffers::StagingBufferWrapper::new(device, (size / WORKGROUP_SIZE) as _);
 
         let uniforms_buffer = UniformBufferWrapper::new(device, Uniforms::default(), wgpu::ShaderStages::COMPUTE);
 
@@ -93,8 +102,7 @@ impl oxyde::App for App {
             })
         };
 
-
-        let counting_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
+        let read_write_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
                 .add_binding_compute(wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
@@ -106,13 +114,36 @@ impl oxyde::App for App {
                     min_binding_size: None,
                 })
                 .create(device, None);
+        
+        let single_read_write_storage_buffer_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
+            .add_binding_compute(wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            })
+            .create(device, None);
 
-        let counting_bind_group = binding_builder::BindGroupBuilder::new(&counting_bind_group_layout_with_desc)
+        let counting_bind_group = binding_builder::BindGroupBuilder::new(&read_write_bind_group_layout_with_desc)
             .resource(value_buffer.as_entire_binding())
             .resource(count_buffer.as_entire_binding())
-            .create(device, Some("sorting bind_group"));
-        
+            .create(device, Some("counting_bind_group"));
 
+        // Bind group for scan then propagate
+
+        let scan_bind_group = binding_builder::BindGroupBuilder::new(&single_read_write_storage_buffer_bind_group_layout_with_desc)
+            .resource(count_buffer.as_entire_binding())
+            .create(device, Some("scan_bind_group"));
+
+        let scan_sub_copy_bind_group = binding_builder::BindGroupBuilder::new(&read_write_bind_group_layout_with_desc)
+            .resource(count_buffer.as_entire_binding())
+            .resource(sub_scan_buffer.as_entire_binding())
+                .create(device, Some("scan_sub_copy_bind_group"));
+
+        let sub_scan_bind_group = binding_builder::BindGroupBuilder::new(&single_read_write_storage_buffer_bind_group_layout_with_desc)
+            .resource(sub_scan_buffer.as_entire_binding())
+            .create(device, Some("sub_scan_bind_group"));
+        // Shaders modules
+    
         let counting_naga_module = ShaderComposer::new(include_str!("../shaders/counting.wgsl").into(), Some("counting"))
             .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
             .build()
@@ -123,11 +154,28 @@ impl oxyde::App for App {
             source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(counting_naga_module)),
         });
 
+        let scan_naga_module = ShaderComposer::new(include_str!("../shaders/scan.wgsl").into(), Some("scan"))
+            .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
+            .build()
+            .unwrap();
+
+        let scan_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("scan shader"),
+            source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(scan_naga_module)),
+        });
+
+        let workgroup_copy_naga_module = ShaderComposer::new(include_str!("../shaders/workgroup_copy.wgsl").into(), Some("workgroup copy"))
+            .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
+            .build()
+            .unwrap();
+
+        // Pipelines
+
         let counting_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("counting pipeline"),
             layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("counting pipeline layout"),
-                bind_group_layouts: &[&counting_bind_group_layout_with_desc.layout],
+                bind_group_layouts: &[&read_write_bind_group_layout_with_desc.layout],
                 push_constant_ranges: &[],
             })),
             module: &counting_shader_module,
@@ -138,60 +186,76 @@ impl oxyde::App for App {
             label: Some("counting reset pipeline"),
             layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("counting reset pipeline layout"),
-                bind_group_layouts: &[&counting_bind_group_layout_with_desc.layout],
+                bind_group_layouts: &[&read_write_bind_group_layout_with_desc.layout],
                 push_constant_ranges: &[],
             })),
             module: &counting_shader_module,
             entry_point: "reset",
         });
-
-        let scan_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
-            .add_binding_compute(wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            })
-            .create(device, None);
-
-        let scan_bind_group = binding_builder::BindGroupBuilder::new(&scan_bind_group_layout_with_desc)
-            .resource(count_buffer.as_entire_binding())
-            .create(device, Some("scan bind_group"));
-            
-        let scan_naga_module = ShaderComposer::new(include_str!("../shaders/scan.wgsl").into(), Some("scan"))
-            .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
-            .build()
-            .unwrap();
         
-        let scan_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("scan pipeline"),
+        let workgroup_scan_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("workgroup scan pipeline"),
             layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("scan pipeline layout"),
-                bind_group_layouts: &[&scan_bind_group_layout_with_desc.layout],
+                label: Some("workgroup scan pipeline layout"),
+                bind_group_layouts: &[&single_read_write_storage_buffer_bind_group_layout_with_desc.layout],
+                push_constant_ranges: &[],
+            })),
+            module: &scan_shader_module,
+            entry_point: "workgroup_scan",
+        });
+
+        let copy_workgroup_scan_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("copy workgroup scan pipeline"),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("copy workgroup scan pipeline layout"),
+                bind_group_layouts: &[&read_write_bind_group_layout_with_desc.layout],
                 push_constant_ranges: &[],
             })),
             module: &device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("scan shader"),
-                source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(scan_naga_module)),
+                source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(workgroup_copy_naga_module)),
             }),
-            entry_point: "workgroup_scan",
+            entry_point: "workgroup_copy",
         });
-        
+
+        let workgroup_propagate_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("workgroup propagate pipeline"),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("workgroup propagate pipeline layout"),
+                bind_group_layouts: &[
+                    &single_read_write_storage_buffer_bind_group_layout_with_desc.layout,
+                    &single_read_write_storage_buffer_bind_group_layout_with_desc.layout
+                ],
+                push_constant_ranges: &[],
+            })),
+            module: &scan_shader_module,
+            entry_point: "workgroup_propagate",
+        });
+
         Self {
             size,
             do_sorting: true,
             uniforms_buffer,
             value_buffer,
             count_buffer,
+            sub_scan_buffer,
+
             value_staging_buffer,
             count_staging_buffer,
+            sub_scan_staging_buffer,
+
             init_random_value_bind_group,
             counting_bind_group,
             scan_bind_group,
+            sub_scan_bind_group,
+            scan_sub_copy_bind_group,
             
             init_random_pipeline,
             counting_pipeline,
             reset_pipeline,
-            scan_pipeline,
+            workgroup_scan_pipeline,
+            copy_workgroup_scan_pipeline,
+            workgroup_propagate_pipeline,
         }
     }
 
@@ -236,13 +300,27 @@ impl oxyde::App for App {
                 compute_pass.set_bind_group(0, &self.counting_bind_group, &[]);
                 compute_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
 
-                compute_pass.set_pipeline(&self.scan_pipeline);
+                compute_pass.set_pipeline(&self.workgroup_scan_pipeline);
                 compute_pass.set_bind_group(0, &self.scan_bind_group, &[]);
+                compute_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
+
+                compute_pass.set_pipeline(&self.copy_workgroup_scan_pipeline);
+                compute_pass.set_bind_group(0, &self.scan_sub_copy_bind_group, &[]);
+                compute_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
+
+                compute_pass.set_pipeline(&self.workgroup_scan_pipeline);
+                compute_pass.set_bind_group(0, &self.sub_scan_bind_group, &[]);
+                compute_pass.dispatch_workgroups(std::cmp::max(workgroup_size_x/WORKGROUP_SIZE, 1), 1, 1);
+
+                compute_pass.set_pipeline(&self.workgroup_propagate_pipeline);
+                compute_pass.set_bind_group(0, &self.scan_bind_group, &[]);
+                compute_pass.set_bind_group(1, &self.sub_scan_bind_group, &[]);
                 compute_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
             }
 
             self.value_staging_buffer.encode_read(&mut compute_encoder, &self.value_buffer);
             self.count_staging_buffer.encode_read(&mut compute_encoder, &self.count_buffer);
+            self.sub_scan_staging_buffer.encode_read(&mut compute_encoder, &self.sub_scan_buffer);
             
             // See https://github.com/gfx-rs/wgpu/issues/3806
             let index = app_state.queue.submit(Some(compute_encoder.finish()));
@@ -258,6 +336,8 @@ impl oxyde::App for App {
                 let _ = sender_count.send(result).unwrap();
             }));
 
+            self.sub_scan_staging_buffer.map_buffer(None::<fn(Result<(), wgpu::BufferAsyncError>)>);
+
             // wait here for map_buffer to be finished (with wait the lock should be set successfully set)
             app_state.device.poll(wgpu::Maintain::Wait);
             
@@ -268,11 +348,13 @@ impl oxyde::App for App {
             // Read buffer
             self.value_staging_buffer.read_and_unmap_buffer();
             self.count_staging_buffer.read_and_unmap_buffer();
+            self.sub_scan_staging_buffer.read_and_unmap_buffer();
             
             if self.size <= 128 {
                 println!("values      : {:?}", self.value_staging_buffer.values_as_slice());
                 println!("counts      : {:?}", self.count_staging_buffer.values_as_slice());
             }
+            // println!("sub scan    : {:?}", self.sub_scan_staging_buffer.values_as_slice());
 
             {
                 //check equality by doing same count on cpu
@@ -280,18 +362,12 @@ impl oxyde::App for App {
                 for value in self.value_staging_buffer.values_as_slice().iter() {
                     count_cpu[*value as usize] += 1;
                 }
-
-                //scan on count_cpu using iterative method
-                for group_index in 0..(self.size/WORKGROUP_SIZE) {
-                    let offset = group_index * WORKGROUP_SIZE;
-                    for i in 1..WORKGROUP_SIZE {
-                        count_cpu[(offset + i) as usize] += count_cpu[(offset + i - 1) as usize];
-                    }
+                for i in 1..(self.size as usize) {
+                    count_cpu[i] += count_cpu[i - 1];
                 }
 
-                println!("counts scan : {:?}", count_cpu.as_slice());
-
-                println!("scan gpu    : {:?}", self.count_staging_buffer.values_as_slice());
+                // println!("counts scan : {:?}", count_cpu.as_slice());
+                // println!("scan gpu    : {:?}", self.count_staging_buffer.values_as_slice());
 
                 println!("Count valid : {}", count_cpu == self.count_staging_buffer.values_as_slice());
             }

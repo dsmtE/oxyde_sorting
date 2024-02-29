@@ -1,5 +1,7 @@
 @group(0) @binding(0) var<storage, read_write> values : array<u32>;
 
+@group(1) @binding(0) var<storage, read_write> propagate_scan_values : array<u32>;
+
 // TODO: understand how to use subgroups (https://github.com/gfx-rs/wgpu/pull/4190)
 // Test reduce then scan algorithm
 
@@ -40,4 +42,20 @@ fn workgroup_scan(
     // TODO
     //  Do the scan on the last element of each workgroup stored in a separate buffer (to be able to sort it wihin one workgroup as deviceMemoryBarrier is not available yet in wgpu)
     // Then reduce and sum over all the workgroups to get the global scan 
+}
+
+@compute @workgroup_size(#WORKGROUP_SIZE)
+fn workgroup_propagate(
+    @builtin(global_invocation_id) globalInvocationId : vec3<u32>,
+    @builtin(workgroup_id) workgroupId : vec3<u32>,
+) {
+    let total = arrayLength(&values);
+
+    let gid: u32 = globalInvocationId.x;
+    let wid: u32 = workgroupId.x;
+
+    if (gid >= total) { return; }
+    if (wid == 0) { return; }
+
+    values[gid] += propagate_scan_values[wid-1];
 }
