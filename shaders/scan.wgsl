@@ -13,6 +13,8 @@
 // Should be implemented using deviceMemoryBarrier but it's not available in wgpu yet
 // https://raphlinus.github.io/gpu/2021/11/17/prefix-sum-portable.html
 
+var<workgroup> workgroup_memory : array<u32, #WORKGROUP_SIZE>;
+
 @compute @workgroup_size(#WORKGROUP_SIZE)
 fn workgroup_scan(
     @builtin(global_invocation_id) globalInvocationId : vec3<u32>,
@@ -29,16 +31,21 @@ fn workgroup_scan(
 
     if (gid >= total) { return; }
 
+    workgroup_memory[lid] = values[gid];
+    workgroupBarrier();
+
     // do the scan at the workgroup level using workgroup memory barrier
     // Kogge-Stone method
     for (var offset = 1u; offset < #WORKGROUP_SIZE; offset <<= 1u) {
-        workgroupBarrier();
         if (lid >= offset) {
-            let temp = values[gid - offset];
+            let temp = workgroup_memory[lid - offset];
             workgroupBarrier();
-            values[gid] += temp;
+            workgroup_memory[lid] += temp;
         }
     }
+
+    workgroupBarrier();
+    values[gid] = workgroup_memory[lid];
     // TODO
     //  Do the scan on the last element of each workgroup stored in a separate buffer (to be able to sort it wihin one workgroup as deviceMemoryBarrier is not available yet in wgpu)
     // Then reduce and sum over all the workgroups to get the global scan 
