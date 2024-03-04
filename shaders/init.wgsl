@@ -1,9 +1,11 @@
-struct Uniforms {
+struct InitUniforms {
     current_time_ms: u32,
+    init_method: u32,
+    init_value: u32,
 }
 
 @group(0) @binding(0) var<storage, read_write> values : array<u32>;
-@group(1) @binding(0) var<uniform> uniforms : Uniforms;
+@group(1) @binding(0) var<uniform> uniforms : InitUniforms;
 
 // from : https://github.com/JMS55/bevy/blob/solari3/crates/bevy_pbr/src/solari/global_illumination/utils.wgsl#L8-L36
 fn rand_u(seed: u32) -> u32 {
@@ -18,6 +20,11 @@ fn main(@builtin(global_invocation_id) GlobalInvocationID : vec3<u32>) {
     let index: u32 = GlobalInvocationID.x;
     if (index >= total) { return; }
 
-    // values[index] = index;
-    values[index] = rand_u(index + uniforms.current_time_ms) % total;
+    if (uniforms.init_method == 0u) {
+        values[index] = uniforms.init_value;
+    }else if (uniforms.init_method == 1u) {
+        values[index] = index;
+    } else {
+        values[index] = rand_u(index + uniforms.current_time_ms) % total;
+    }
 }
