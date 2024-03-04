@@ -1,7 +1,4 @@
 @group(0) @binding(0) var<storage, read_write> values : array<u32>;
-
-@group(1) @binding(0) var<storage, read_write> propagate_scan_values : array<u32>;
-
 // TODO: understand how to use subgroups (https://github.com/gfx-rs/wgpu/pull/4190)
 // Test reduce then scan algorithm
 
@@ -29,13 +26,19 @@ fn workgroup_scan(
     // let wid: u32 = workgroupId.x;
     // gid = wid * numWorkgroups.x + lid;
 
-    if (gid >= total) { return; }
+    var workgroup_stride: u32 = 1u;
+    for (var i = 0u; i < u32(#SCAN_LEVEL); i++) {
+        workgroup_stride *= u32(#WORKGROUP_SIZE);
+    }
+    let index = (gid + 1u) * workgroup_stride - 1u;
 
-    workgroup_memory[lid] = values[gid];
+    if (index >= total) { return; }
+
+    // Copy the global memory to the workgroup memory
+    workgroup_memory[lid] = values[index];
     workgroupBarrier();
 
-    // do the scan at the workgroup level using workgroup memory barrier
-    // Kogge-Stone method
+    // do the scan at the workgroup level using Kogge-Stone method
     for (var offset = 1u; offset < #WORKGROUP_SIZE; offset <<= 1u) {
         if (lid >= offset) {
             let temp = workgroup_memory[lid - offset];
@@ -44,8 +47,10 @@ fn workgroup_scan(
         }
     }
 
+    // Copy the workgroup memory back to the global memory
     workgroupBarrier();
-    values[gid] = workgroup_memory[lid];
+    values[index] = workgroup_memory[lid];
+
     // TODO
     //  Do the scan on the last element of each workgroup stored in a separate buffer (to be able to sort it wihin one workgroup as deviceMemoryBarrier is not available yet in wgpu)
     // Then reduce and sum over all the workgroups to get the global scan 
@@ -64,5 +69,14 @@ fn workgroup_propagate(
     if (gid >= total) { return; }
     if (wid == 0) { return; }
 
-    values[gid] += propagate_scan_values[wid-1];
+    var workgroup_stride: u32 = 1u;
+    for (var i = 0u; i < u32(#SCAN_LEVEL) + 1u; i++) {
+        workgroup_stride *= u32(#WORKGROUP_SIZE);
+    }
+
+    let workgroup_sum_id = wid * workgroup_stride - 1u;
+
+    if (gid < (wid+1) * workgroup_stride - 1u) {
+        values[gid] += values[workgroup_sum_id];
+    }
 }
