@@ -1,6 +1,6 @@
 [package]
 name = "oxyde_sorting"
-version = "0.0.1"
+version = "1.0.0"
 authors = ["DE SMET Enguerrand"]
 edition = "2021"
 
@@ -17,9 +17,8 @@ bytemuck = { version = "1.13", features = [ "derive" ] }
 [patch."https://github.com/dsmtE/oxyde"]
 oxyde = { path = "crates/oxyde" }
 
-[[bin]]
-name = "rusty_boids"
-path = "src/main.rs"
+[dev-dependencies]
+pollster = "0.3.0"
 
 [profile.dev.package."*"]
 opt-level = 3
