@@ -119,7 +119,7 @@ impl oxyde::App for App {
 
         // Shaders modules
         let init_naga_module = ShaderComposer::new(include_str!("../shaders/init.wgsl").into(), Some("init"))
-            .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
+            .with_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
             .build()
             .unwrap();
 
@@ -129,7 +129,7 @@ impl oxyde::App for App {
         });
 
         let counting_naga_module = ShaderComposer::new(include_str!("../shaders/counting.wgsl").into(), Some("counting"))
-            .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
+            .with_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
             .build()
             .unwrap();
         
@@ -144,8 +144,8 @@ impl oxyde::App for App {
             label: Some("scan shader"),
             source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(
                 ShaderComposer::new(scan_source_str, Some("scan"))
-                .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
-                .add_shader_define("SCAN_LEVEL", 0.into())
+                .with_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
+                .with_shader_define("SCAN_LEVEL", 0.into())
                 .build()
                 .unwrap()
             )),
@@ -157,8 +157,8 @@ impl oxyde::App for App {
             label: Some("scan shader"),
             source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(
                 ShaderComposer::new(scan_source_str, Some("scan"))
-                .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
-                .add_shader_define("SCAN_LEVEL", 1.into())
+                .with_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
+                .with_shader_define("SCAN_LEVEL", 1.into())
                 .build()
                 .unwrap()
             )),
@@ -168,7 +168,7 @@ impl oxyde::App for App {
             label: Some("counting shader"),
             source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(
                 ShaderComposer::new(include_str!("../shaders/sorting.wgsl").into(), Some("sorting"))
-                    .add_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
+                    .with_shader_define("WORKGROUP_SIZE", WORKGROUP_SIZE.into())
                     .build()
                     .unwrap()
             )),
