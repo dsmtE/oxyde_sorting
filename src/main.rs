@@ -1,4 +1,5 @@
 mod app;
+mod sorting;
 
 fn main() {
     oxyde::fern::Dispatch::new()
