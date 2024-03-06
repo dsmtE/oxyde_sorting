@@ -1,5 +1,5 @@
 [package]
-name = "rusty_boids"
+name = "oxyde_sorting"
 version = "0.0.1"
 authors = ["DE SMET Enguerrand"]
 edition = "2021"
