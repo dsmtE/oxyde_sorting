@@ -295,7 +295,7 @@ impl oxyde::App for App {
 
             let mut commands: Vec<CommandBuffer> = vec![];
 
-            let workgroup_size_x = self.size as u32/WORKGROUP_SIZE;
+            let workgroup_size_x = (self.size as u32 + WORKGROUP_SIZE)/ WORKGROUP_SIZE;
 
             {
                 let mut init_values_command_encoder: wgpu::CommandEncoder = app_state
