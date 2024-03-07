@@ -111,10 +111,10 @@ impl GpuCoutingSortModule {
             .create(device, Some("count_buffer_bind_group"));
         
         // Pipelines
-        let counting_shader_module = &device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let counting_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("counting shader"),
             source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(
-                ShaderComposer::new(include_str!("../shaders/counting.wgsl").into(), Some("counting"))
+                ShaderComposer::new(include_str!("../shaders/counting.wgsl"), Some("counting"))
                     .with_shader_define("WORKGROUP_SIZE", workgroup_size.into())
                     .build()
                     .unwrap()
@@ -138,10 +138,10 @@ impl GpuCoutingSortModule {
             source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(scan_shader_composer.build().unwrap())),
         });
 
-        let sorting_shader_module = &device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let sorting_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("counting shader"),
             source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(
-                ShaderComposer::new(include_str!("../shaders/sorting.wgsl").into(), Some("sorting"))
+                ShaderComposer::new(include_str!("../shaders/sorting.wgsl"), Some("sorting"))
                     .with_shader_define("WORKGROUP_SIZE", workgroup_size.into())
                     .build()
                     .unwrap()
