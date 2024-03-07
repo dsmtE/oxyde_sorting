@@ -15,7 +15,7 @@ use oxyde::{
 //
 // The Scan part is done using the Kogge-Stone method at the workgroup level
 // then using the strategy of "scan then propagate" by doing a second scan on the bigger values of each previous workgroup then propagating those values to get the final scan
-pub struct GpuCoutingSortModule {
+pub struct GpuCountingSortModule {
     workgroup_size: u32,
     size: u32,
 
@@ -33,17 +33,17 @@ pub struct GpuCoutingSortModule {
 }
 
 #[derive(Debug)]
-pub enum CoutingSortingError {
+pub enum CountingSortingError {
     MissingBufferUsage(wgpu::BufferUsages, &'static str),
     SizeError(u32, u32),
 }
 
-impl std::fmt::Display for CoutingSortingError {
+impl std::fmt::Display for CountingSortingError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            CoutingSortingError::MissingBufferUsage(buffer_usage, buffer_name) =>
+            CountingSortingError::MissingBufferUsage(buffer_usage, buffer_name) =>
                 write!(f, "Missing buffer usage {:?} for {}", buffer_usage, buffer_name),
-            CoutingSortingError::SizeError(size, workgroup_size) => {
+            CountingSortingError::SizeError(size, workgroup_size) => {
                 write!(
                     f,
                     "Unable to handle a buffer of size {} with a workgroup size of {} (Current limitation workgroup_size*workgroup_size : {})",
@@ -56,32 +56,32 @@ impl std::fmt::Display for CoutingSortingError {
     }
 }
 
-impl std::error::Error for CoutingSortingError {}
+impl std::error::Error for CountingSortingError {}
 
-impl GpuCoutingSortModule {
+impl GpuCountingSortModule {
     pub fn new(
         device: &wgpu::Device,
         values_buffer: &wgpu::Buffer,
         count_buffer: &wgpu::Buffer,
         workgroup_size: u32,
-    ) -> Result<Self, CoutingSortingError> {
+    ) -> Result<Self, CountingSortingError> {
         if !count_buffer.usage().contains(wgpu::BufferUsages::COPY_DST) {
-            return Err(CoutingSortingError::MissingBufferUsage(wgpu::BufferUsages::COPY_DST, "Count buffer"));
+            return Err(CountingSortingError::MissingBufferUsage(wgpu::BufferUsages::COPY_DST, "Count buffer"));
         }
 
         if !values_buffer.usage().contains(wgpu::BufferUsages::STORAGE) {
-            return Err(CoutingSortingError::MissingBufferUsage(wgpu::BufferUsages::STORAGE, "Values buffer"));
+            return Err(CountingSortingError::MissingBufferUsage(wgpu::BufferUsages::STORAGE, "Values buffer"));
         }
 
         if !count_buffer.usage().contains(wgpu::BufferUsages::STORAGE) {
-            return Err(CoutingSortingError::MissingBufferUsage(wgpu::BufferUsages::STORAGE, "Count buffer"));
+            return Err(CountingSortingError::MissingBufferUsage(wgpu::BufferUsages::STORAGE, "Count buffer"));
         }
 
         let count_buffer_size = count_buffer.size();
         let size: u32 = (count_buffer_size / std::mem::size_of::<u32>() as u64) as _;
 
         if size > workgroup_size * workgroup_size {
-            return Err(CoutingSortingError::SizeError(size, workgroup_size));
+            return Err(CountingSortingError::SizeError(size, workgroup_size));
         }
 
         let sorting_id_buffer = buffers::create_buffer_for_size(
@@ -241,7 +241,7 @@ impl GpuCoutingSortModule {
     }
 }
 
-impl GpuCoutingSortModule {
+impl GpuCountingSortModule {
     // TODO: find a way to store some kind of reference to the buffer to avoid the need to pass it as an argument
     pub fn dispatch_work(&self, encoder: &mut wgpu::CommandEncoder, count_buffer: &wgpu::Buffer) {
         let workgroup_size_x = (self.size + self.workgroup_size) / self.workgroup_size;

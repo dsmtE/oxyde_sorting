@@ -8,7 +8,7 @@ use oxyde::{
     },
 };
 
-use oxyde_sorting::GpuCoutingSortModule;
+use oxyde_sorting::GpuCountingSortModule;
 
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Default)]
 #[repr(C)]
@@ -21,7 +21,7 @@ struct InitUniforms {
 struct BuffersAndPipeline {
     value_buffer: wgpu::Buffer,
     count_buffer: wgpu::Buffer,
-    couting_sort_module: GpuCoutingSortModule,
+    counting_sort_module: GpuCountingSortModule,
     value_staging_buffer: StagingBufferWrapper<u32, true>,
     count_staging_buffer: StagingBufferWrapper<u32, true>,
     sorting_staging_buffer: StagingBufferWrapper<u32, true>,
@@ -45,7 +45,7 @@ fn init_buffers_and_pipeline(device: &wgpu::Device, size: u32, workgroup_size: u
         size as u64 * size_of_u32,
     );
 
-    let couting_sort_module = GpuCoutingSortModule::new(&device, &value_buffer, &count_buffer, workgroup_size).unwrap();
+    let counting_sort_module = GpuCountingSortModule::new(&device, &value_buffer, &count_buffer, workgroup_size).unwrap();
 
     let value_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, size as _);
     let count_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, size as _);
@@ -97,7 +97,7 @@ fn init_buffers_and_pipeline(device: &wgpu::Device, size: u32, workgroup_size: u
     BuffersAndPipeline {
         value_buffer,
         count_buffer,
-        couting_sort_module,
+        counting_sort_module,
         value_staging_buffer,
         count_staging_buffer,
         sorting_staging_buffer,
@@ -185,7 +185,7 @@ fn check_sorting() {
     let BuffersAndPipeline {
         value_buffer,
         count_buffer,
-        couting_sort_module,
+        counting_sort_module,
         mut value_staging_buffer,
         mut count_staging_buffer,
         mut sorting_staging_buffer,
@@ -228,7 +228,7 @@ fn check_sorting() {
         let mut counting_scan_command_encoder: wgpu::CommandEncoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Conting and scan encoder") });
 
-        couting_sort_module.dispatch_work(&mut counting_scan_command_encoder, &count_buffer);
+        counting_sort_module.dispatch_work(&mut counting_scan_command_encoder, &count_buffer);
         commands.push(counting_scan_command_encoder.finish());
     }
 
@@ -238,7 +238,7 @@ fn check_sorting() {
 
         value_staging_buffer.encode_read(&mut copy_buffer_command_encoder, &value_buffer);
         count_staging_buffer.encode_read(&mut copy_buffer_command_encoder, &count_buffer);
-        sorting_staging_buffer.encode_read(&mut copy_buffer_command_encoder, couting_sort_module.sorting_id_buffer());
+        sorting_staging_buffer.encode_read(&mut copy_buffer_command_encoder, counting_sort_module.sorting_id_buffer());
 
         commands.push(copy_buffer_command_encoder.finish());
     }
