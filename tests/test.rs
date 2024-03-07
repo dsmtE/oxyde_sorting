@@ -176,6 +176,14 @@ fn is_sorted_by_id(values: &[u32], sorting_id: &[u32]) -> bool {
 }
 
 #[test]
+#[should_panic(expected = "SizeError(4096, 32)")]
+fn wrong_workgroup_size() {
+    let (device, _) = init_device_and_queue();
+
+    init_buffers_and_pipeline(&device, 4096u32, 32u32);
+}
+
+#[test]
 fn check_sorting() {
     let (device, queue) = init_device_and_queue();
 
