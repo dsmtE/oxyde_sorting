@@ -1,6 +1,6 @@
 use oxyde::{
-    wgpu,
     anyhow::Result,
+    wgpu,
     wgpu_utils::{binding_builder, buffers, ShaderComposer},
 };
 
@@ -13,7 +13,7 @@ use oxyde::{
 //
 // The counting sort isn't stable as the last step is done in parallel and the order of the elements in the same bucket isn't preserved during this step
 //
-// The Scan part is done using the Kogge-Stone method at the workgroup level 
+// The Scan part is done using the Kogge-Stone method at the workgroup level
 // then using the strategy of "scan then propagate" by doing a second scan on the bigger values of each previous workgroup then propagating those values to get the final scan
 pub struct GpuCoutingSortModule {
     workgroup_size: u32,
@@ -41,9 +41,16 @@ pub enum CoutingSortingError {
 impl std::fmt::Display for CoutingSortingError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            CoutingSortingError::MissingBufferUsage(buffer_usage, buffer_name) => write!(f, "Missing buffer usage {:?} for {}", buffer_usage, buffer_name),
+            CoutingSortingError::MissingBufferUsage(buffer_usage, buffer_name) =>
+                write!(f, "Missing buffer usage {:?} for {}", buffer_usage, buffer_name),
             CoutingSortingError::SizeError(size, workgroup_size) => {
-                write!(f, "Unable to handle a buffer of size {} with a workgroup size of {} (Current limitation workgroup_size*workgroup_size : {})", size, workgroup_size, workgroup_size*workgroup_size)
+                write!(
+                    f,
+                    "Unable to handle a buffer of size {} with a workgroup size of {} (Current limitation workgroup_size*workgroup_size : {})",
+                    size,
+                    workgroup_size,
+                    workgroup_size * workgroup_size
+                )
             },
         }
     }
@@ -52,8 +59,12 @@ impl std::fmt::Display for CoutingSortingError {
 impl std::error::Error for CoutingSortingError {}
 
 impl GpuCoutingSortModule {
-    pub fn new(device: &wgpu::Device, values_buffer: &wgpu::Buffer, count_buffer: &wgpu::Buffer, workgroup_size: u32) -> Result<Self, CoutingSortingError> {
-
+    pub fn new(
+        device: &wgpu::Device,
+        values_buffer: &wgpu::Buffer,
+        count_buffer: &wgpu::Buffer,
+        workgroup_size: u32,
+    ) -> Result<Self, CoutingSortingError> {
         if !count_buffer.usage().contains(wgpu::BufferUsages::COPY_DST) {
             return Err(CoutingSortingError::MissingBufferUsage(wgpu::BufferUsages::COPY_DST, "Count buffer"));
         }
@@ -73,17 +84,22 @@ impl GpuCoutingSortModule {
             return Err(CoutingSortingError::SizeError(size, workgroup_size));
         }
 
-        let sorting_id_buffer= buffers::create_buffer_for_size(device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC , Some("sorting id buffer"), count_buffer.size());
+        let sorting_id_buffer = buffers::create_buffer_for_size(
+            device,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            Some("sorting id buffer"),
+            count_buffer.size(),
+        );
 
         // init bind groups
         let single_read_write_storage_buffer_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
             .add_binding_compute(wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                })
-                .create(device, None);
-        
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            })
+            .create(device, None);
+
         let read_write_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
             .add_binding_compute(wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -105,11 +121,11 @@ impl GpuCoutingSortModule {
         let sorting_bind_group = binding_builder::BindGroupBuilder::new(&single_read_write_storage_buffer_bind_group_layout_with_desc)
             .resource(sorting_id_buffer.as_entire_binding())
             .create(device, Some("sorting_bind_group"));
-    
+
         let count_buffer_bind_group = binding_builder::BindGroupBuilder::new(&single_read_write_storage_buffer_bind_group_layout_with_desc)
             .resource(count_buffer.as_entire_binding())
             .create(device, Some("count_buffer_bind_group"));
-        
+
         // Pipelines
         let counting_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("counting shader"),
@@ -117,13 +133,13 @@ impl GpuCoutingSortModule {
                 ShaderComposer::new(include_str!("../shaders/counting.wgsl"), Some("counting"))
                     .with_shader_define("WORKGROUP_SIZE", workgroup_size.into())
                     .build()
-                    .unwrap()
+                    .unwrap(),
             )),
         });
 
-        let mut scan_shader_composer = ShaderComposer::new(include_str!("../shaders/scan.wgsl"), Some("scan"))
-            .with_shader_define("WORKGROUP_SIZE", workgroup_size.into());
-        
+        let mut scan_shader_composer =
+            ShaderComposer::new(include_str!("../shaders/scan.wgsl"), Some("scan")).with_shader_define("WORKGROUP_SIZE", workgroup_size.into());
+
         scan_shader_composer.add_shader_define("SCAN_LEVEL", 0u32.into());
         let scan_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("scan shader"),
@@ -144,7 +160,7 @@ impl GpuCoutingSortModule {
                 ShaderComposer::new(include_str!("../shaders/sorting.wgsl"), Some("sorting"))
                     .with_shader_define("WORKGROUP_SIZE", workgroup_size.into())
                     .build()
-                    .unwrap()
+                    .unwrap(),
             )),
         });
 
@@ -158,7 +174,7 @@ impl GpuCoutingSortModule {
             module: &counting_shader_module,
             entry_point: "count",
         });
-        
+
         let workgroup_scan_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("workgroup scan pipeline"),
             layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -226,15 +242,17 @@ impl GpuCoutingSortModule {
 }
 
 impl GpuCoutingSortModule {
-
     // TODO: find a way to store some kind of reference to the buffer to avoid the need to pass it as an argument
-    pub fn dispatch_work(&self, encoder: &mut wgpu::CommandEncoder, count_buffer: &wgpu::Buffer) { 
-        let workgroup_size_x = (self.size + self.workgroup_size)/ self.workgroup_size;
+    pub fn dispatch_work(&self, encoder: &mut wgpu::CommandEncoder, count_buffer: &wgpu::Buffer) {
+        let workgroup_size_x = (self.size + self.workgroup_size) / self.workgroup_size;
 
         encoder.clear_buffer(count_buffer, 0, None);
 
         {
-            let count_pass = &mut encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Compting Pass"), timestamp_writes: None });
+            let count_pass = &mut encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Compting Pass"),
+                timestamp_writes: None,
+            });
 
             count_pass.set_pipeline(&self.counting_pipeline);
             count_pass.set_bind_group(0, &self.counting_bind_group, &[]);
@@ -242,8 +260,11 @@ impl GpuCoutingSortModule {
         }
 
         {
-            let scan_pass = &mut encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Scan Pass"), timestamp_writes: None });
-                
+            let scan_pass = &mut encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Scan Pass"),
+                timestamp_writes: None,
+            });
+
             scan_pass.set_bind_group(0, &self.count_buffer_bind_group, &[]);
 
             scan_pass.set_pipeline(&self.workgroup_scan_pipeline);
@@ -255,7 +276,10 @@ impl GpuCoutingSortModule {
         }
 
         {
-            let sort_pass = &mut encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Sort Pass"), timestamp_writes: None });
+            let sort_pass = &mut encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Sort Pass"),
+                timestamp_writes: None,
+            });
 
             sort_pass.set_pipeline(&self.sorting_pipeline);
             sort_pass.set_bind_group(0, &self.counting_bind_group, &[]);

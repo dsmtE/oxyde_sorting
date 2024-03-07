@@ -1,7 +1,10 @@
 use oxyde::{
     wgpu,
-    wgpu_utils:: {
-        binding_builder, buffers::{self, StagingBufferWrapper}, uniform_buffer::UniformBufferWrapper, ShaderComposer
+    wgpu_utils::{
+        binding_builder,
+        buffers::{self, StagingBufferWrapper},
+        uniform_buffer::UniformBufferWrapper,
+        ShaderComposer,
     },
 };
 
@@ -27,11 +30,21 @@ struct BuffersAndPipeline {
     init_values_pipeline: wgpu::ComputePipeline,
 }
 
-fn init_buffers_and_pipeline(device: &wgpu::Device, size : u32, workgroup_size: u32) -> BuffersAndPipeline {
+fn init_buffers_and_pipeline(device: &wgpu::Device, size: u32, workgroup_size: u32) -> BuffersAndPipeline {
     let size_of_u32 = std::mem::size_of::<u32>() as u64;
-    let value_buffer = buffers::create_buffer_for_size(&device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, Some("values buffer"), size as u64 * size_of_u32);
-    let count_buffer = buffers::create_buffer_for_size(&device, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST, Some("count buffer"), size as u64 * size_of_u32);
-    
+    let value_buffer = buffers::create_buffer_for_size(
+        &device,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        Some("values buffer"),
+        size as u64 * size_of_u32,
+    );
+    let count_buffer = buffers::create_buffer_for_size(
+        &device,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        Some("count buffer"),
+        size as u64 * size_of_u32,
+    );
+
     let couting_sort_module = GpuCoutingSortModule::new(&device, &value_buffer, &count_buffer, workgroup_size).unwrap();
 
     let value_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, size as _);
@@ -40,8 +53,12 @@ fn init_buffers_and_pipeline(device: &wgpu::Device, size : u32, workgroup_size: 
 
     let init_uniforms_buffer = UniformBufferWrapper::new(
         &device,
-        InitUniforms{ current_time_ms: 0, init_method: 0, init_value: 0 },
-        wgpu::ShaderStages::COMPUTE
+        InitUniforms {
+            current_time_ms: 0,
+            init_method: 0,
+            init_value: 0,
+        },
+        wgpu::ShaderStages::COMPUTE,
     );
 
     let value_bind_group_layout_with_desc = binding_builder::BindGroupLayoutBuilder::new()
@@ -51,7 +68,7 @@ fn init_buffers_and_pipeline(device: &wgpu::Device, size : u32, workgroup_size: 
             min_binding_size: None,
         })
         .create(&device, None);
-    
+
     let value_bind_group = binding_builder::BindGroupBuilder::new(&value_bind_group_layout_with_desc)
         .resource(value_buffer.as_entire_binding())
         .create(&device, Some("init random value bind_group"));
@@ -62,7 +79,7 @@ fn init_buffers_and_pipeline(device: &wgpu::Device, size : u32, workgroup_size: 
             ShaderComposer::new(include_str!("shaders/init.wgsl").into(), Some("init"))
                 .with_shader_define("WORKGROUP_SIZE", workgroup_size.into())
                 .build()
-                .unwrap()
+                .unwrap(),
         )),
     });
 
@@ -145,7 +162,7 @@ fn counting_sort_on_cpu(values_slice: &[u32], count_size: usize) -> (Vec<u32>, V
     let mut count_cpu = count_values(values_slice, count_size);
     cpu_prefix_sum(count_cpu.as_mut_slice());
     let (sorting_id_cpu, count_after_sort_cpu) = sorting_id_sort_from_count(values_slice, &count_cpu);
-    
+
     (count_cpu, sorting_id_cpu, count_after_sort_cpu)
 }
 
@@ -157,7 +174,6 @@ fn is_sorted_by_id(values: &[u32], sorting_id: &[u32]) -> bool {
     }
     true
 }
-
 
 #[test]
 fn check_sorting() {
@@ -177,40 +193,48 @@ fn check_sorting() {
         value_bind_group,
         init_values_pipeline,
     } = init_buffers_and_pipeline(&device, size, workgroup_size);
-    
 
-    init_uniforms_buffer.content_mut().current_time_ms = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u32;
+    init_uniforms_buffer.content_mut().current_time_ms = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as u32;
     init_uniforms_buffer.content_mut().init_method = 2u32;
     init_uniforms_buffer.update_content(&queue);
 
     let mut commands: Vec<wgpu::CommandBuffer> = vec![];
 
-    let workgroup_size_x = (size as u32 + workgroup_size)/ workgroup_size;
+    let workgroup_size_x = (size as u32 + workgroup_size) / workgroup_size;
 
     {
-        let mut init_values_command_encoder: wgpu::CommandEncoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("init values encoder") });
+        let mut init_values_command_encoder: wgpu::CommandEncoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("init values encoder") });
 
         {
-            let init_pass = &mut init_values_command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Init values Pass"), timestamp_writes: None });
+            let init_pass = &mut init_values_command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Init values Pass"),
+                timestamp_writes: None,
+            });
 
             init_pass.set_pipeline(&init_values_pipeline);
             init_pass.set_bind_group(0, &value_bind_group, &[]);
             init_pass.set_bind_group(1, &init_uniforms_buffer.bind_group(), &[]);
             init_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
         }
-        
+
         commands.push(init_values_command_encoder.finish());
     }
 
     {
-        let mut counting_scan_command_encoder: wgpu::CommandEncoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Conting and scan encoder") });
+        let mut counting_scan_command_encoder: wgpu::CommandEncoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Conting and scan encoder") });
 
         couting_sort_module.dispatch_work(&mut counting_scan_command_encoder, &count_buffer);
         commands.push(counting_scan_command_encoder.finish());
     }
 
     {
-        let mut copy_buffer_command_encoder: wgpu::CommandEncoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Copy buffer encoder") });
+        let mut copy_buffer_command_encoder: wgpu::CommandEncoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Copy buffer encoder") });
 
         value_staging_buffer.encode_read(&mut copy_buffer_command_encoder, &value_buffer);
         count_staging_buffer.encode_read(&mut copy_buffer_command_encoder, &count_buffer);
@@ -218,7 +242,7 @@ fn check_sorting() {
 
         commands.push(copy_buffer_command_encoder.finish());
     }
-    
+
     // See https://github.com/gfx-rs/wgpu/issues/3806
     let index = queue.submit(commands);
     device.poll(wgpu::Maintain::WaitForSubmissionIndex(index));
@@ -227,7 +251,7 @@ fn check_sorting() {
     value_staging_buffer.map_buffer(Some(move |result: Result<(), wgpu::BufferAsyncError>| {
         let _ = sender_value.send(result).unwrap();
     }));
-    
+
     let (sender_count, receiver_count) = std::sync::mpsc::channel();
     count_staging_buffer.map_buffer(Some(move |result: Result<(), wgpu::BufferAsyncError>| {
         let _ = sender_count.send(result).unwrap();
@@ -237,10 +261,16 @@ fn check_sorting() {
 
     // wait here for map_buffer to be finished (with wait the lock should be set successfully set)
     device.poll(wgpu::Maintain::Wait);
-    
+
     // Read bufferAsyncError
-    receiver_value.recv().expect("MPSC channel must not fail").expect("buffer reading value failed");
-    receiver_count.recv().expect("MPSC channel must not fail").expect("buffer reading count failed");
+    receiver_value
+        .recv()
+        .expect("MPSC channel must not fail")
+        .expect("buffer reading value failed");
+    receiver_count
+        .recv()
+        .expect("MPSC channel must not fail")
+        .expect("buffer reading count failed");
 
     // Read buffer
     value_staging_buffer.read_and_unmap_buffer();
@@ -254,10 +284,10 @@ fn check_sorting() {
     println!("Sort   : {:?}", sorting_staging_buffer.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
 
     let values_slice = value_staging_buffer.values_as_slice();
-    
+
     // Do the same work as expected on CPU
     let (_, sorting_id_cpu, count_after_sort_cpu) = counting_sort_on_cpu(values_slice, size as usize);
-    
+
     let sorted_cpu = is_sorted_by_id(values_slice, &sorting_id_cpu);
     let sorted_gpu = is_sorted_by_id(values_slice, sorting_staging_buffer.values_as_slice());
     let count_after_sort_equal = count_after_sort_cpu == count_staging_buffer.values_as_slice();
