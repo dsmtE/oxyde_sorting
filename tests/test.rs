@@ -6,6 +6,7 @@ use oxyde::{
         uniform_buffer::UniformBufferWrapper,
         ShaderComposer,
     },
+    log,
 };
 
 use oxyde_sorting::GpuCountingSortModule;
@@ -191,6 +192,11 @@ fn wrong_workgroup_size() {
 
 #[test]
 fn check_sorting() {
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Debug)
+        .with_module_level("naga", log::LevelFilter::Info)
+        .init().unwrap();
+
     let (device, queue) = init_device_and_queue();
 
     let size = 8192u32;
