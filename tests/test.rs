@@ -134,7 +134,14 @@ fn init_device_and_queue() -> (wgpu::Device, wgpu::Queue) {
     device.on_uncaptured_error(Box::new(|err| panic!("{}", err)));
 
     device.set_device_lost_callback(Box::new(|device_lost_reason, str| {
+        match device_lost_reason {
+            wgpu::DeviceLostReason::ReplacedCallback => {
+                log::debug!("Device replace lost callback: {}", str);
+            }
+            _ => {
         panic!("Device lost: {:?} - {}", device_lost_reason, str);
+            }
+        }
     }));
 
     (device, queue)
@@ -317,4 +324,7 @@ fn check_sorting() {
     assert!(sorted_cpu, "CPU sorting is not correct");
     assert!(sorted_gpu, "GPU sorting is not correct");
     assert!(count_after_sort_equal, "CPU and GPU count after sort are not equal");
+
+    // Clear device lost callback
+    device.set_device_lost_callback(Box::new(|_, _| {}));
 }
