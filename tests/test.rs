@@ -114,8 +114,9 @@ fn init_device_and_queue() -> (wgpu::Device, wgpu::Queue) {
         ..Default::default()
     });
 
+    // Force HighPerformance adapter for choosing Dedicated GPU as it seems to not work (Device lost: Dropped - Device is dying.) on integrated intel GPU (Intel(R) Iris(R) Xe Graphics)
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::None,
+        power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: None,
         force_fallback_adapter: false,
     }))
