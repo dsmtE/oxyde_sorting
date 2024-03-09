@@ -140,7 +140,7 @@ fn init_device_and_queue() -> (wgpu::Device, wgpu::Queue) {
                 log::debug!("Device replace lost callback: {}", str);
             }
             _ => {
-        panic!("Device lost: {:?} - {}", device_lost_reason, str);
+                panic!("Device lost: {:?} - {}", device_lost_reason, str);
             }
         }
     }));
@@ -203,6 +203,7 @@ fn check_sorting() {
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)
         .with_module_level("naga", log::LevelFilter::Info)
+        .with_module_level("wgpu_core", log::LevelFilter::Info)
         .init().unwrap();
 
     let (device, queue) = init_device_and_queue();
