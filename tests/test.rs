@@ -130,6 +130,12 @@ fn init_device_and_queue() -> (wgpu::Device, wgpu::Queue) {
     ))
     .unwrap();
 
+    device.on_uncaptured_error(Box::new(|err| panic!("{}", err)));
+
+    device.set_device_lost_callback(Box::new(|device_lost_reason, str| {
+        panic!("Device lost: {:?} - {}", device_lost_reason, str);
+    }));
+
     (device, queue)
 }
 
