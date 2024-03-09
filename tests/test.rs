@@ -55,7 +55,7 @@ fn init_buffers_and_pipeline(device: &wgpu::Device, size: u32, workgroup_size: u
         &device,
         InitUniforms {
             current_time_ms: 0,
-            init_method: 0,
+            init_method: 2,
             init_value: 0,
         },
         wgpu::ShaderStages::COMPUTE,
