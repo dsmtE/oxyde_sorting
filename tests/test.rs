@@ -285,22 +285,24 @@ fn check_sorting() {
     count_staging_buffer.read_and_unmap_buffer();
     sorting_staging_buffer.read_and_unmap_buffer();
 
-    const MAX_TO_SHOW: usize = 64;
-    println!("Size   : {} (show only first {} elements)", size, std::cmp::min(size as usize, MAX_TO_SHOW));
-    println!("values : {:?}", value_staging_buffer.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
-    println!("counts : {:?}", count_staging_buffer.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
-    println!("Sort   : {:?}", sorting_staging_buffer.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
-
     let values_slice = value_staging_buffer.values_as_slice();
 
     // Do the same work as expected on CPU
     let (_, sorting_id_cpu, count_after_sort_cpu) = counting_sort_on_cpu(values_slice, size as usize);
+
+    const MAX_TO_SHOW: usize = 64;
+    println!("Size       : {} (show only first {} elements)", size, std::cmp::min(size as usize, MAX_TO_SHOW));
+    println!("values     : {:?}", value_staging_buffer.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
+    println!("GPU counts : {:?}", count_staging_buffer.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
+    println!("CPU counts : {:?}", count_after_sort_cpu.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
+    println!("GPU Sort   : {:?}", sorting_staging_buffer.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
+    println!("CPU Sort   : {:?}", sorting_id_cpu.iter().take(MAX_TO_SHOW).collect::<Vec<_>>());
 
     let sorted_cpu = is_sorted_by_id(values_slice, &sorting_id_cpu);
     let sorted_gpu = is_sorted_by_id(values_slice, sorting_staging_buffer.values_as_slice());
     let count_after_sort_equal = count_after_sort_cpu == count_staging_buffer.values_as_slice();
 
     assert!(sorted_cpu, "CPU sorting is not correct");
-    assert!(count_after_sort_equal, "CPU and GPU count after sort are not equal");
     assert!(sorted_gpu, "GPU sorting is not correct");
+    assert!(count_after_sort_equal, "CPU and GPU count after sort are not equal");
 }
