@@ -249,6 +249,7 @@ impl GpuCountingSortModule {
 
         log::trace!("[GpuCountingSortModule] Dispatching {} workgroups of size {} (for buffer of {})", workgroup_size_x, self.workgroup_size, self.size);
 
+        encoder.push_debug_group("Counting Sort");
         encoder.clear_buffer(count_buffer, 0, None);
 
         {
@@ -270,12 +271,19 @@ impl GpuCountingSortModule {
 
             scan_pass.set_bind_group(0, &self.count_buffer_bind_group, &[]);
 
+            scan_pass.push_debug_group(format!("First Scan ({} workgroups)", workgroup_size_x).as_str());
             scan_pass.set_pipeline(&self.workgroup_scan_pipeline);
             scan_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
+            scan_pass.pop_debug_group();
+            let second_scan_workgroup_size_x = (workgroup_size_x + self.workgroup_size - 1u32) / self.workgroup_size;
+            scan_pass.push_debug_group(format!("Second Scan ({} workgroups)", second_scan_workgroup_size_x).as_str());
             scan_pass.set_pipeline(&self.workgroup_scan_level1_pipeline);
-            scan_pass.dispatch_workgroups(std::cmp::max(workgroup_size_x / self.workgroup_size, 1), 1, 1);
+            scan_pass.dispatch_workgroups(second_scan_workgroup_size_x, 1, 1);
+            scan_pass.pop_debug_group();
+            scan_pass.push_debug_group("Propagate");
             scan_pass.set_pipeline(&self.workgroup_propagate_pipeline);
             scan_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
+            scan_pass.pop_debug_group();
         }
 
         {
@@ -289,6 +297,7 @@ impl GpuCountingSortModule {
             sort_pass.set_bind_group(1, &self.sorting_bind_group, &[]);
             sort_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
         }
+        encoder.pop_debug_group();
     }
 
     pub fn sorting_id_buffer(&self) -> &wgpu::Buffer { &self.sorting_id_buffer }
