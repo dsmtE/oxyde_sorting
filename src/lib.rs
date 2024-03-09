@@ -2,6 +2,7 @@ use oxyde::{
     anyhow::Result,
     wgpu,
     wgpu_utils::{binding_builder, buffers, ShaderComposer},
+    log,
 };
 
 // Structure that handle the counting and sorting of a buffer of u32
@@ -245,6 +246,8 @@ impl GpuCountingSortModule {
     // TODO: find a way to store some kind of reference to the buffer to avoid the need to pass it as an argument
     pub fn dispatch_work(&self, encoder: &mut wgpu::CommandEncoder, count_buffer: &wgpu::Buffer) {
         let workgroup_size_x = (self.size + self.workgroup_size - 1u32) / self.workgroup_size;
+
+        log::trace!("[GpuCountingSortModule] Dispatching {} workgroups of size {} (for buffer of {})", workgroup_size_x, self.workgroup_size, self.size);
 
         encoder.clear_buffer(count_buffer, 0, None);
 
