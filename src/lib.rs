@@ -1,8 +1,9 @@
+use log;
+
 use oxyde::{
     anyhow::Result,
     wgpu,
-    wgpu_utils::{binding_builder, buffers, ShaderComposer},
-    log,
+    wgpu_utils::{binding_builder, buffers, ShaderComposer}
 };
 
 // Structure that handle the counting and sorting of a buffer of u32

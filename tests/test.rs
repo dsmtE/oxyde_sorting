@@ -1,12 +1,9 @@
+use log;
+
 use oxyde::{
-    wgpu,
-    wgpu_utils::{
-        binding_builder,
-        buffers::{self, StagingBufferWrapper},
-        uniform_buffer::UniformBufferWrapper,
-        ShaderComposer,
-    },
-    log,
+    wgpu, wgpu_utils::{
+        self, binding_builder, buffers::{self, StagingBufferWrapper}, uniform_buffer::UniformBufferWrapper, ShaderComposer
+    }
 };
 
 use oxyde_sorting::GpuCountingSortModule;
@@ -108,29 +105,14 @@ fn init_buffers_and_pipeline(device: &wgpu::Device, size: u32, workgroup_size: u
     }
 }
 
-fn init_device_and_queue() -> (wgpu::Device, wgpu::Queue) {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::PRIMARY,
-        ..Default::default()
-    });
+fn init_render_instance_and_device() -> (wgpu_utils::render_handles::RenderInstance, usize) {
+    let mut render_instance = wgpu_utils::render_handles::RenderInstance::new(None, None);
 
     // Force HighPerformance adapter for choosing Dedicated GPU as it seems to not work (Device lost: Dropped - Device is dying.) on integrated intel GPU (Intel(R) Iris(R) Xe Graphics)
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-    }))
-    .unwrap();
+    let device_handle_id = pollster::block_on(render_instance.device(None, Some(wgpu::PowerPreference::HighPerformance)))
+        .expect("Device creation failed");
 
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: None,
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-        },
-        None,
-    ))
-    .unwrap();
+    let device = &render_instance.devices[device_handle_id].device;
 
     device.on_uncaptured_error(Box::new(|err| panic!("{}", err)));
 
@@ -145,7 +127,7 @@ fn init_device_and_queue() -> (wgpu::Device, wgpu::Queue) {
         }
     }));
 
-    (device, queue)
+    (render_instance, device_handle_id)
 }
 
 fn count_values(values: &[u32], count_size: usize) -> Vec<u32> {
@@ -193,9 +175,11 @@ fn is_sorted_by_id(values: &[u32], sorting_id: &[u32]) -> bool {
 #[test]
 #[should_panic(expected = "SizeError(4096, 32)")]
 fn wrong_workgroup_size() {
-    let (device, _) = init_device_and_queue();
+    let (render_instance, device_handle_id) = init_render_instance_and_device();
 
-    init_buffers_and_pipeline(&device, 4096u32, 32u32);
+    let device = &render_instance.devices[device_handle_id].device;
+
+    init_buffers_and_pipeline(device, 4096u32, 32u32);
 }
 
 #[test]
@@ -206,7 +190,10 @@ fn check_sorting() {
         .with_module_level("wgpu_core", log::LevelFilter::Info)
         .init().unwrap();
 
-    let (device, queue) = init_device_and_queue();
+    let (render_instance, device_handle_id) = init_render_instance_and_device();
+    let device_handle = &render_instance.devices[device_handle_id];
+
+    let wgpu_utils::render_handles::DeviceHandle { device, queue, .. } = device_handle;
 
     let size = 8192u32;
     let workgroup_size = 128u32;
