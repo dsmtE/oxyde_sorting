@@ -310,6 +310,9 @@ fn check_sorting() {
     let sorted_gpu = is_sorted_by_id(values_slice, sorting_staging_buffer.values_as_slice());
     let count_after_sort_equal = count_after_sort_cpu == count_staging_buffer.values_as_slice();
 
+    // Clear device lost callback
+    device.set_device_lost_callback(Box::new(|_, _| {}));
+
     assert!(sorted_cpu, "CPU sorting is not correct");
     assert!(sorted_gpu, "GPU sorting is not correct");
     assert!(count_after_sort_equal, "CPU and GPU count after sort are not equal");
