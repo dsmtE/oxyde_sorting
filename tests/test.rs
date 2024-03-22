@@ -182,8 +182,7 @@ fn wrong_workgroup_size() {
     init_buffers_and_pipeline(device, 4096u32, 32u32);
 }
 
-#[test]
-fn check_sorting() {
+fn check_sorting_with_sizes(size: u32, workgroup_size: u32) {
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)
         .with_module_level("naga", log::LevelFilter::Info)
@@ -194,9 +193,6 @@ fn check_sorting() {
     let device_handle = &render_instance.devices[device_handle_id];
 
     let wgpu_utils::render_handles::DeviceHandle { device, queue, .. } = device_handle;
-
-    let size = 8192u32;
-    let workgroup_size = 128u32;
 
     let BuffersAndPipeline {
         value_buffer,
@@ -316,7 +312,25 @@ fn check_sorting() {
     assert!(sorted_cpu, "CPU sorting is not correct");
     assert!(sorted_gpu, "GPU sorting is not correct");
     assert!(count_after_sort_equal, "CPU and GPU count after sort are not equal");
-
-    // Clear device lost callback
-    device.set_device_lost_callback(Box::new(|_, _| {}));
 }
+
+#[test]
+fn check_8192_128() { check_sorting_with_sizes(8192, 128); }
+
+#[test]
+fn check_8192_256() { check_sorting_with_sizes(8192, 256); }
+
+#[test]
+fn check_16384_128() { check_sorting_with_sizes(16384, 128); }
+
+#[test]
+fn check_16_4() { check_sorting_with_sizes(16, 4); }
+
+#[test]
+fn check_64_4() { check_sorting_with_sizes(64, 4); }
+
+#[test]
+fn check_20_4() { check_sorting_with_sizes(20, 4); }
+
+#[test]
+fn check_64_8() { check_sorting_with_sizes(64, 8); }

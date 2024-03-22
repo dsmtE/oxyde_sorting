@@ -28,16 +28,16 @@ pub struct GpuCountingSortModule {
     count_buffer_bind_group: wgpu::BindGroup,
 
     counting_pipeline: wgpu::ComputePipeline,
-    workgroup_scan_pipeline: wgpu::ComputePipeline,
-    workgroup_scan_level1_pipeline: wgpu::ComputePipeline,
-    workgroup_propagate_pipeline: wgpu::ComputePipeline,
+
+    workgroup_scan_pipelines: Vec<wgpu::ComputePipeline>,
+    workgroup_propagate_pipelines: Vec<wgpu::ComputePipeline>,
     sorting_pipeline: wgpu::ComputePipeline,
 }
 
 #[derive(Debug)]
 pub enum CountingSortingError {
     MissingBufferUsage(wgpu::BufferUsages, &'static str),
-    SizeError(u32, u32),
+    ToManyScanThenPropagateLevels(u32, u32, u32),
 }
 
 impl std::fmt::Display for CountingSortingError {
@@ -45,15 +45,15 @@ impl std::fmt::Display for CountingSortingError {
         match self {
             CountingSortingError::MissingBufferUsage(buffer_usage, buffer_name) =>
                 write!(f, "Missing buffer usage {:?} for {}", buffer_usage, buffer_name),
-            CountingSortingError::SizeError(size, workgroup_size) => {
+            CountingSortingError::ToManyScanThenPropagateLevels(size, workgroup_size, scan_then_propagate_levels) => {
                 write!(
                     f,
-                    "Unable to handle a buffer of size {} with a workgroup size of {} (Current limitation workgroup_size*workgroup_size : {})",
+                    "Unable to handle a buffer of size {} with a workgroup size of {}, this require too many scan and propagate levels ({} levels)",
                     size,
                     workgroup_size,
-                    workgroup_size * workgroup_size
+                    scan_then_propagate_levels
                 )
-            },
+            }
         }
     }
 }
@@ -82,8 +82,18 @@ impl GpuCountingSortModule {
         let count_buffer_size = count_buffer.size();
         let size: u32 = (count_buffer_size / std::mem::size_of::<u32>() as u64) as _;
 
-        if size > workgroup_size * workgroup_size {
-            return Err(CountingSortingError::SizeError(size, workgroup_size));
+        let scan_then_propagate_level_count: u32 = {
+            let mut count = 1;
+            let mut temp_size = size / workgroup_size;
+            while temp_size > 0 {
+                count += 1;
+                temp_size /= workgroup_size;   
+            }
+            count
+        };
+
+        if scan_then_propagate_level_count > 4 {
+            return Err(CountingSortingError::ToManyScanThenPropagateLevels(size, workgroup_size, scan_then_propagate_level_count));
         }
 
         let sorting_id_buffer = buffers::create_buffer_for_size(
@@ -142,19 +152,44 @@ impl GpuCountingSortModule {
         let mut scan_shader_composer =
             ShaderComposer::new(include_str!("../shaders/scan.wgsl"), Some("scan")).with_shader_define("WORKGROUP_SIZE", workgroup_size.into());
 
-        scan_shader_composer.add_shader_define("SCAN_LEVEL", 0u32.into());
-        let scan_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scan shader"),
-            source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(scan_shader_composer.build_ref().unwrap())),
-        });
+        
+        let mut workgroup_scan_pipelines = Vec::with_capacity(scan_then_propagate_level_count as usize);
+        let mut workgroup_propagate_pipelines = Vec::with_capacity((scan_then_propagate_level_count-1) as usize);
 
-        // Unable to use push_constant as it's not available in wgpu yet so we have to use a shader define for the scan level
-        // Otherwise we could have used a uniform buffer to pass the scan level but this force use to submit the queue for each scan level
-        scan_shader_composer.add_shader_define("SCAN_LEVEL", 1u32.into());
-        let scan_level1_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scan shader"),
-            source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(scan_shader_composer.build().unwrap())),
-        });
+        for scan_then_propagate_level in 0..scan_then_propagate_level_count {
+            // Unable to use push_constant as it's not available in wgpu yet so we have to use a shader define for the scan level and recompile the shader for each level
+            // Otherwise we could have used a uniform buffer to pass the scan level but this force use to submit the queue for each scan level
+            scan_shader_composer.add_shader_define("SCAN_LEVEL", scan_then_propagate_level.into());
+
+            let scan_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("scan shader"),
+                source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(scan_shader_composer.build_ref().unwrap())),
+            });
+
+            workgroup_scan_pipelines.push(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(format!("workgroup scan pipeline (level {})", scan_then_propagate_level).as_str()),
+                layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(format!("workgroup scan pipeline layout (level {})", scan_then_propagate_level).as_str()),
+                    bind_group_layouts: &[&single_read_write_storage_buffer_bind_group_layout_with_desc.layout],
+                    push_constant_ranges: &[],
+                })),
+                module: &scan_shader_module,
+                entry_point: "workgroup_scan",
+            }));
+
+            if scan_then_propagate_level < scan_then_propagate_level_count - 1 {
+                workgroup_propagate_pipelines.push(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(format!("workgroup propagate pipeline (level {})", scan_then_propagate_level).as_str()),
+                    layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some(format!("workgroup propagate pipeline layout (level {})", scan_then_propagate_level).as_str()),
+                        bind_group_layouts: &[&single_read_write_storage_buffer_bind_group_layout_with_desc.layout],
+                        push_constant_ranges: &[],
+                    })),
+                    module: &scan_shader_module,
+                    entry_point: "workgroup_propagate",
+                }));
+            }
+        }
 
         let sorting_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("counting shader"),
@@ -175,39 +210,6 @@ impl GpuCountingSortModule {
             })),
             module: &counting_shader_module,
             entry_point: "count",
-        });
-
-        let workgroup_scan_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("workgroup scan pipeline"),
-            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("workgroup scan pipeline layout"),
-                bind_group_layouts: &[&single_read_write_storage_buffer_bind_group_layout_with_desc.layout],
-                push_constant_ranges: &[],
-            })),
-            module: &scan_shader_module,
-            entry_point: "workgroup_scan",
-        });
-
-        let workgroup_scan_level1_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("workgroup scan level1 pipeline"),
-            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("workgroup scan level1 pipeline layout"),
-                bind_group_layouts: &[&single_read_write_storage_buffer_bind_group_layout_with_desc.layout],
-                push_constant_ranges: &[],
-            })),
-            module: &scan_level1_shader_module,
-            entry_point: "workgroup_scan",
-        });
-
-        let workgroup_propagate_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("workgroup propagate pipeline"),
-            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("workgroup propagate pipeline layout"),
-                bind_group_layouts: &[&single_read_write_storage_buffer_bind_group_layout_with_desc.layout],
-                push_constant_ranges: &[],
-            })),
-            module: &scan_shader_module,
-            entry_point: "workgroup_propagate",
         });
 
         let sorting_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -235,9 +237,8 @@ impl GpuCountingSortModule {
             count_buffer_bind_group,
 
             counting_pipeline,
-            workgroup_scan_pipeline,
-            workgroup_scan_level1_pipeline,
-            workgroup_propagate_pipeline,
+            workgroup_scan_pipelines,
+            workgroup_propagate_pipelines,
             sorting_pipeline,
         })
     }
@@ -271,20 +272,26 @@ impl GpuCountingSortModule {
             });
 
             scan_pass.set_bind_group(0, &self.count_buffer_bind_group, &[]);
+            
+            let scan_workgroup_sizes = std::iter::successors(
+                    Some(workgroup_size_x),
+                    |&x| Some((x + self.workgroup_size - 1u32) / self.workgroup_size))
+                .take(self.workgroup_scan_pipelines.len())
+                .collect::<Vec<_>>();
 
-            scan_pass.push_debug_group(format!("First Scan ({} workgroups)", workgroup_size_x).as_str());
-            scan_pass.set_pipeline(&self.workgroup_scan_pipeline);
-            scan_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
-            scan_pass.pop_debug_group();
-            let second_scan_workgroup_size_x = (workgroup_size_x + self.workgroup_size - 1u32) / self.workgroup_size;
-            scan_pass.push_debug_group(format!("Second Scan ({} workgroups)", second_scan_workgroup_size_x).as_str());
-            scan_pass.set_pipeline(&self.workgroup_scan_level1_pipeline);
-            scan_pass.dispatch_workgroups(second_scan_workgroup_size_x, 1, 1);
-            scan_pass.pop_debug_group();
-            scan_pass.push_debug_group("Propagate");
-            scan_pass.set_pipeline(&self.workgroup_propagate_pipeline);
-            scan_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
-            scan_pass.pop_debug_group();
+            for (workgroup_scan_pipeline, workgroup_size_x) in self.workgroup_scan_pipelines.iter().zip(scan_workgroup_sizes.iter()) {
+                scan_pass.push_debug_group(format!("Scan ({} workgroups)", workgroup_size_x).as_str());
+                scan_pass.set_pipeline(workgroup_scan_pipeline);
+                scan_pass.dispatch_workgroups(*workgroup_size_x, 1, 1);
+                scan_pass.pop_debug_group();
+            }
+
+            for (workgroup_propagate_pipeline, workgroup_size_x) in self.workgroup_propagate_pipelines.iter().rev().zip(scan_workgroup_sizes.iter().rev().skip(1)) {
+                scan_pass.push_debug_group(format!("Propagate ({} workgroups)", workgroup_size_x).as_str());
+                scan_pass.set_pipeline(workgroup_propagate_pipeline);
+                scan_pass.dispatch_workgroups(*workgroup_size_x, 1, 1);
+                scan_pass.pop_debug_group();
+            }
         }
 
         {
