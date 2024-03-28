@@ -60,6 +60,26 @@ impl std::fmt::Display for CountingSortingError {
 
 impl std::error::Error for CountingSortingError {}
 
+//This function is used to compute the number of scan then propagate levels required to scan the count buffer for a given size and workgroup size
+fn scan_then_propagate_level_count(size: u32, workgroup_size: u32) -> u32 {
+    let mut count = 1;
+    let mut temp_size = size / workgroup_size;
+    while temp_size > 0 {
+        count += 1;
+        temp_size /= workgroup_size;
+    }
+    count
+}
+
+fn workgroup_size_per_level(size: u32, workgroup_size: u32, level: u32) -> Vec<u32> {
+    std::iter::successors(
+        Some(size),
+        |&x| Some((x + workgroup_size - 1) / workgroup_size))
+    .take((level+1) as usize)
+    .skip(1)
+    .collect()
+}
+
 impl GpuCountingSortModule {
     pub fn new(
         device: &wgpu::Device,
@@ -82,15 +102,7 @@ impl GpuCountingSortModule {
         let count_buffer_size = count_buffer.size();
         let size: u32 = (count_buffer_size / std::mem::size_of::<u32>() as u64) as _;
 
-        let scan_then_propagate_level_count: u32 = {
-            let mut count = 1;
-            let mut temp_size = size / workgroup_size;
-            while temp_size > 0 {
-                count += 1;
-                temp_size /= workgroup_size;   
-            }
-            count
-        };
+        let scan_then_propagate_level_count = scan_then_propagate_level_count(size, workgroup_size);
 
         if scan_then_propagate_level_count > 4 {
             return Err(CountingSortingError::ToManyScanThenPropagateLevels(size, workgroup_size, scan_then_propagate_level_count));
@@ -273,22 +285,18 @@ impl GpuCountingSortModule {
 
             scan_pass.set_bind_group(0, &self.count_buffer_bind_group, &[]);
             
-            let scan_workgroup_sizes = std::iter::successors(
-                    Some(workgroup_size_x),
-                    |&x| Some((x + self.workgroup_size - 1u32) / self.workgroup_size))
-                .take(self.workgroup_scan_pipelines.len())
-                .collect::<Vec<_>>();
+            let scan_workgroup_sizes = workgroup_size_per_level(self.size, self.workgroup_size, self.workgroup_scan_pipelines.len() as u32);
 
             for (workgroup_scan_pipeline, workgroup_size_x) in self.workgroup_scan_pipelines.iter().zip(scan_workgroup_sizes.iter()) {
                 scan_pass.push_debug_group(format!("Scan ({} workgroups)", workgroup_size_x).as_str());
-                scan_pass.set_pipeline(workgroup_scan_pipeline);
+                                scan_pass.set_pipeline(workgroup_scan_pipeline);
                 scan_pass.dispatch_workgroups(*workgroup_size_x, 1, 1);
                 scan_pass.pop_debug_group();
             }
 
             for (workgroup_propagate_pipeline, workgroup_size_x) in self.workgroup_propagate_pipelines.iter().rev().zip(scan_workgroup_sizes.iter().rev().skip(1)) {
                 scan_pass.push_debug_group(format!("Propagate ({} workgroups)", workgroup_size_x).as_str());
-                scan_pass.set_pipeline(workgroup_propagate_pipeline);
+                                scan_pass.set_pipeline(workgroup_propagate_pipeline);
                 scan_pass.dispatch_workgroups(*workgroup_size_x, 1, 1);
                 scan_pass.pop_debug_group();
             }
