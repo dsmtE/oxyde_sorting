@@ -159,7 +159,7 @@ fn counting_sort_on_cpu(values_slice: &[u32], count_size: usize) -> (Vec<u32>, V
     let mut count_cpu = count_values(values_slice, count_size);
     cpu_prefix_sum(count_cpu.as_mut_slice());
     let (sorting_id_cpu, count_after_sort_cpu) = sorting_id_sort_from_count(values_slice, &count_cpu);
-
+    
     (count_cpu, sorting_id_cpu, count_after_sort_cpu)
 }
 
@@ -296,11 +296,11 @@ fn check_sorting_with_sizes(size: u32, workgroup_size: u32) {
 
     const MAX_TO_SHOW: usize = 64;
     println!("Size       : {} (show only last {} elements)", size, std::cmp::min(size as usize, MAX_TO_SHOW));
-    println!("values     : {:?}", value_staging_buffer.iter().rev().take(MAX_TO_SHOW).collect::<Vec<_>>());
-    println!("GPU counts : {:?}", count_staging_buffer.iter().rev().take(MAX_TO_SHOW).collect::<Vec<_>>());
-    println!("CPU counts : {:?}", count_after_sort_cpu.iter().rev().take(MAX_TO_SHOW).collect::<Vec<_>>());
-    println!("GPU Sort   : {:?}", sorting_staging_buffer.iter().rev().take(MAX_TO_SHOW).collect::<Vec<_>>());
-    println!("CPU Sort   : {:?}", sorting_id_cpu.iter().rev().take(MAX_TO_SHOW).collect::<Vec<_>>());
+    println!("values     : {:?}", value_staging_buffer.iter().rev().take(MAX_TO_SHOW).rev().collect::<Vec<_>>());
+    println!("GPU counts : {:?}", count_staging_buffer.iter().rev().take(MAX_TO_SHOW).rev().collect::<Vec<_>>());
+    println!("CPU counts : {:?}", count_after_sort_cpu.iter().rev().take(MAX_TO_SHOW).rev().collect::<Vec<_>>());
+    println!("GPU Sort   : {:?}", sorting_staging_buffer.iter().rev().take(MAX_TO_SHOW).rev().collect::<Vec<_>>());
+    println!("CPU Sort   : {:?}", sorting_id_cpu.iter().rev().take(MAX_TO_SHOW).rev().collect::<Vec<_>>());
 
     let sorted_cpu = is_sorted_by_id(values_slice, &sorting_id_cpu);
     let sorted_gpu = is_sorted_by_id(values_slice, sorting_staging_buffer.values_as_slice());
