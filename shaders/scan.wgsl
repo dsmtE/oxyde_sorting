@@ -66,17 +66,25 @@ fn workgroup_propagate(
     let gid: u32 = globalInvocationId.x;
     let wid: u32 = workgroupId.x;
 
-    if (gid >= total) { return; }
+    // Skip the first workgroup
+    // TODO: do better by calling only the workgroup needed and shift the offset
     if (wid == 0) { return; }
 
+    let workgroup_size: u32 = u32(#WORKGROUP_SIZE);
     var workgroup_stride: u32 = 1u;
-    for (var i = 0u; i < u32(#SCAN_LEVEL) + 1u; i++) {
-        workgroup_stride *= u32(#WORKGROUP_SIZE);
+    for (var i = 0u; i < u32(#SCAN_LEVEL); i++) {
+        workgroup_stride *= workgroup_size;
     }
 
-    let workgroup_sum_id = wid * workgroup_stride - 1u;
+    let index = (gid + 1u) * workgroup_stride - 1u;
 
-    if (gid < (wid+1) * workgroup_stride - 1u) {
-        values[gid] += values[workgroup_sum_id];
-    }
+    if (index >= total) { return; }
+
+    let workgroup_sum_id = wid * (workgroup_stride * workgroup_size) - 1u;
+
+    // skip if we are on the last element of the workgroup
+    // As the last element of each workgroup is the sum of the workgroup, we don't need to propagate it to that index
+    if (index >= (wid + 1u) * (workgroup_stride * workgroup_size) - 1u) { return; }
+
+    values[index] += values[workgroup_sum_id];
 }
