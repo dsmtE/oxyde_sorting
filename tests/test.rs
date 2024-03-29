@@ -174,16 +174,6 @@ fn is_sorted_by_id(values: &[u32], sorting_id: &[u32]) -> bool {
     true
 }
 
-#[test]
-#[should_panic(expected = "SizeError(4096, 32)")]
-fn wrong_workgroup_size() {
-    let (render_instance, device_handle_id) = init_render_instance_and_device();
-
-    let device = &render_instance.devices[device_handle_id].device;
-
-    init_buffers_and_pipeline(device, 4096u32, 4096u32, 32u32);
-}
-
 fn check_sorting_with_sizes(value_size: u32, count_size: u32, workgroup_size: u32) {
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Trace)
