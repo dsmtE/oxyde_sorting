@@ -175,11 +175,11 @@ fn is_sorted_by_id(values: &[u32], sorting_id: &[u32]) -> bool {
 }
 
 fn check_sorting_with_sizes(value_size: u32, count_size: u32, workgroup_size: u32) {
-    simple_logger::SimpleLogger::new()
+    let _ = simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Trace)
         .with_module_level("naga", log::LevelFilter::Info)
         .with_module_level("wgpu_core", log::LevelFilter::Info)
-        .init().unwrap();
+        .init();
 
     let (render_instance, device_handle_id) = init_render_instance_and_device();
     let device_handle = &render_instance.devices[device_handle_id];
