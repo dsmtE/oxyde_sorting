@@ -19,7 +19,8 @@ use oxyde::{
 // then using the strategy of "scan then propagate" by doing a second scan on the bigger values of each previous workgroup then propagating those values to get the final scan
 pub struct GpuCountingSortModule {
     workgroup_size: u32,
-    size: u32,
+    value_size: u32,
+    count_size: u32,
 
     sorting_id_buffer: wgpu::Buffer,
 
@@ -99,20 +100,20 @@ impl GpuCountingSortModule {
             return Err(CountingSortingError::MissingBufferUsage(wgpu::BufferUsages::STORAGE, "Count buffer"));
         }
 
-        let count_buffer_size = count_buffer.size();
-        let size: u32 = (count_buffer_size / std::mem::size_of::<u32>() as u64) as _;
+        let count_size: u32 = (count_buffer.size() / std::mem::size_of::<u32>() as u64) as _;
+        let value_size = (values_buffer.size() / std::mem::size_of::<u32>() as u64) as _;
 
-        let scan_then_propagate_level_count = scan_then_propagate_level_count(size, workgroup_size);
+        let scan_then_propagate_level_count = scan_then_propagate_level_count(count_size, workgroup_size);
 
         if scan_then_propagate_level_count > 4 {
-            return Err(CountingSortingError::ToManyScanThenPropagateLevels(size, workgroup_size, scan_then_propagate_level_count));
+            return Err(CountingSortingError::ToManyScanThenPropagateLevels(count_size, workgroup_size, scan_then_propagate_level_count));
         }
 
         let sorting_id_buffer = buffers::create_buffer_for_size(
             device,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             Some("sorting id buffer"),
-            count_buffer.size(),
+            values_buffer.size(),
         );
 
         // init bind groups
@@ -240,7 +241,8 @@ impl GpuCountingSortModule {
 
         Ok(Self {
             workgroup_size,
-            size,
+            value_size,
+            count_size,
 
             sorting_id_buffer,
 
@@ -259,10 +261,9 @@ impl GpuCountingSortModule {
 impl GpuCountingSortModule {
     // TODO: find a way to store some kind of reference to the buffer to avoid the need to pass it as an argument
     pub fn dispatch_work(&self, encoder: &mut wgpu::CommandEncoder, count_buffer: &wgpu::Buffer) {
-        let workgroup_size_x = (self.size + self.workgroup_size - 1u32) / self.workgroup_size;
+        log::trace!("[GpuCountingSortModule] workgroups of size {} (for value buffer of {} and counting buffer or {})", self.workgroup_size, self.value_size, self.count_size);
 
-        log::trace!("[GpuCountingSortModule] Dispatching {} workgroups of size {} (for buffer of {})", workgroup_size_x, self.workgroup_size, self.size);
-
+        let value_workgroup_size_x = (self.value_size + self.workgroup_size - 1) / self.workgroup_size;
         encoder.push_debug_group("Counting Sort");
         encoder.clear_buffer(count_buffer, 0, None);
 
@@ -274,7 +275,7 @@ impl GpuCountingSortModule {
 
             count_pass.set_pipeline(&self.counting_pipeline);
             count_pass.set_bind_group(0, &self.counting_bind_group, &[]);
-            count_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
+            count_pass.dispatch_workgroups(value_workgroup_size_x, 1, 1);
         }
 
         {
@@ -285,18 +286,20 @@ impl GpuCountingSortModule {
 
             scan_pass.set_bind_group(0, &self.count_buffer_bind_group, &[]);
             
-            let scan_workgroup_sizes = workgroup_size_per_level(self.size, self.workgroup_size, self.workgroup_scan_pipelines.len() as u32);
-
+            let scan_workgroup_sizes = workgroup_size_per_level(self.count_size, self.workgroup_size, self.workgroup_scan_pipelines.len() as u32);
+            
             for (workgroup_scan_pipeline, workgroup_size_x) in self.workgroup_scan_pipelines.iter().zip(scan_workgroup_sizes.iter()) {
                 scan_pass.push_debug_group(format!("Scan ({} workgroups)", workgroup_size_x).as_str());
-                                scan_pass.set_pipeline(workgroup_scan_pipeline);
+                log::trace!("[GpuCountingSortModule] Dispatching Scan ({} workgroups)", workgroup_size_x);
+                scan_pass.set_pipeline(workgroup_scan_pipeline);
                 scan_pass.dispatch_workgroups(*workgroup_size_x, 1, 1);
                 scan_pass.pop_debug_group();
             }
 
             for (workgroup_propagate_pipeline, workgroup_size_x) in self.workgroup_propagate_pipelines.iter().rev().zip(scan_workgroup_sizes.iter().rev().skip(1)) {
                 scan_pass.push_debug_group(format!("Propagate ({} workgroups)", workgroup_size_x).as_str());
-                                scan_pass.set_pipeline(workgroup_propagate_pipeline);
+                log::trace!("[GpuCountingSortModule] Dispatching Propagate ({} workgroups)", workgroup_size_x);
+                scan_pass.set_pipeline(workgroup_propagate_pipeline);
                 scan_pass.dispatch_workgroups(*workgroup_size_x, 1, 1);
                 scan_pass.pop_debug_group();
             }
@@ -311,7 +314,7 @@ impl GpuCountingSortModule {
             sort_pass.set_pipeline(&self.sorting_pipeline);
             sort_pass.set_bind_group(0, &self.counting_bind_group, &[]);
             sort_pass.set_bind_group(1, &self.sorting_bind_group, &[]);
-            sort_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
+            sort_pass.dispatch_workgroups(value_workgroup_size_x, 1, 1);
         }
         encoder.pop_debug_group();
     }

@@ -14,6 +14,7 @@ struct InitUniforms {
     current_time_ms: u32,
     init_method: u32,
     init_value: u32,
+    max_value: u32,
 }
 
 struct BuffersAndPipeline {
@@ -28,26 +29,26 @@ struct BuffersAndPipeline {
     init_values_pipeline: wgpu::ComputePipeline,
 }
 
-fn init_buffers_and_pipeline(device: &wgpu::Device, size: u32, workgroup_size: u32) -> BuffersAndPipeline {
+fn init_buffers_and_pipeline(device: &wgpu::Device, value_size: u32, count_size: u32, workgroup_size: u32) -> BuffersAndPipeline {
     let size_of_u32 = std::mem::size_of::<u32>() as u64;
     let value_buffer = buffers::create_buffer_for_size(
         &device,
         wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         Some("values buffer"),
-        size as u64 * size_of_u32,
+        value_size as u64 * size_of_u32,
     );
     let count_buffer = buffers::create_buffer_for_size(
         &device,
         wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         Some("count buffer"),
-        size as u64 * size_of_u32,
+        count_size as u64 * size_of_u32,
     );
 
     let counting_sort_module = GpuCountingSortModule::new(&device, &value_buffer, &count_buffer, workgroup_size).unwrap();
 
-    let value_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, size as _);
-    let count_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, size as _);
-    let sorting_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, size as _);
+    let value_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, value_size as _);
+    let count_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, count_size as _);
+    let sorting_staging_buffer: StagingBufferWrapper<u32, true> = buffers::StagingBufferWrapper::new(&device, value_size as _);
 
     let init_uniforms_buffer = UniformBufferWrapper::new(
         &device,
@@ -55,6 +56,7 @@ fn init_buffers_and_pipeline(device: &wgpu::Device, size: u32, workgroup_size: u
             current_time_ms: 0,
             init_method: 2,
             init_value: 0,
+            max_value: count_size,
         },
         wgpu::ShaderStages::COMPUTE,
     );
@@ -179,12 +181,12 @@ fn wrong_workgroup_size() {
 
     let device = &render_instance.devices[device_handle_id].device;
 
-    init_buffers_and_pipeline(device, 4096u32, 32u32);
+    init_buffers_and_pipeline(device, 4096u32, 4096u32, 32u32);
 }
 
-fn check_sorting_with_sizes(size: u32, workgroup_size: u32) {
+fn check_sorting_with_sizes(value_size: u32, count_size: u32, workgroup_size: u32) {
     simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Debug)
+        .with_level(log::LevelFilter::Trace)
         .with_module_level("naga", log::LevelFilter::Info)
         .with_module_level("wgpu_core", log::LevelFilter::Info)
         .init().unwrap();
@@ -204,7 +206,7 @@ fn check_sorting_with_sizes(size: u32, workgroup_size: u32) {
         mut init_uniforms_buffer,
         value_bind_group,
         init_values_pipeline,
-    } = init_buffers_and_pipeline(&device, size, workgroup_size);
+    } = init_buffers_and_pipeline(&device, value_size, count_size, workgroup_size);
 
     init_uniforms_buffer.content_mut().current_time_ms = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -214,8 +216,6 @@ fn check_sorting_with_sizes(size: u32, workgroup_size: u32) {
     init_uniforms_buffer.update_content(&queue);
 
     let mut commands: Vec<wgpu::CommandBuffer> = vec![];
-
-    let workgroup_size_x = (size as u32 + workgroup_size) / workgroup_size;
 
     {
         let mut init_values_command_encoder: wgpu::CommandEncoder =
@@ -230,7 +230,7 @@ fn check_sorting_with_sizes(size: u32, workgroup_size: u32) {
             init_pass.set_pipeline(&init_values_pipeline);
             init_pass.set_bind_group(0, &value_bind_group, &[]);
             init_pass.set_bind_group(1, &init_uniforms_buffer.bind_group(), &[]);
-            init_pass.dispatch_workgroups(workgroup_size_x, 1, 1);
+            init_pass.dispatch_workgroups((value_size + workgroup_size) / workgroup_size, 1, 1);
         }
 
         commands.push(init_values_command_encoder.finish());
@@ -292,10 +292,11 @@ fn check_sorting_with_sizes(size: u32, workgroup_size: u32) {
     let values_slice = value_staging_buffer.values_as_slice();
 
     // Do the same work as expected on CPU
-    let (_, sorting_id_cpu, count_after_sort_cpu) = counting_sort_on_cpu(values_slice, size as usize);
+    let (_, sorting_id_cpu, count_after_sort_cpu) = counting_sort_on_cpu(values_slice, count_size as usize);
 
     const MAX_TO_SHOW: usize = 64;
-    println!("Size       : {} (show only last {} elements)", size, std::cmp::min(size as usize, MAX_TO_SHOW));
+    println!("Value Size : {} (show only last {} elements)", value_size, std::cmp::min(value_size as usize, MAX_TO_SHOW));
+    println!("Count Size : {} (show only last {} elements)", count_size, std::cmp::min(count_size as usize, MAX_TO_SHOW));
     println!("values     : {:?}", value_staging_buffer.iter().rev().take(MAX_TO_SHOW).rev().collect::<Vec<_>>());
     println!("GPU counts : {:?}", count_staging_buffer.iter().rev().take(MAX_TO_SHOW).rev().collect::<Vec<_>>());
     println!("CPU counts : {:?}", count_after_sort_cpu.iter().rev().take(MAX_TO_SHOW).rev().collect::<Vec<_>>());
@@ -314,23 +315,33 @@ fn check_sorting_with_sizes(size: u32, workgroup_size: u32) {
     assert!(count_after_sort_equal, "CPU and GPU count after sort are not equal");
 }
 
-#[test]
-fn check_8192_128() { check_sorting_with_sizes(8192, 128); }
 
 #[test]
-fn check_8192_256() { check_sorting_with_sizes(8192, 256); }
+fn check_30000_32() { check_sorting_with_sizes(30000, 30000, 32); }
 
 #[test]
-fn check_16384_128() { check_sorting_with_sizes(16384, 128); }
+fn check_32768_32() { check_sorting_with_sizes(32768, 32768, 32); }
 
 #[test]
-fn check_16_4() { check_sorting_with_sizes(16, 4); }
+fn check_8192_64() { check_sorting_with_sizes(8192, 8192, 64); }
 
 #[test]
-fn check_64_4() { check_sorting_with_sizes(64, 4); }
+fn check_8192_128() { check_sorting_with_sizes(8192, 8192, 128); }
 
 #[test]
-fn check_20_4() { check_sorting_with_sizes(20, 4); }
+fn check_8192_256() { check_sorting_with_sizes(8192, 8192, 256); }
 
 #[test]
-fn check_64_8() { check_sorting_with_sizes(64, 8); }
+fn check_16384_128() { check_sorting_with_sizes(16384,  16384, 128); }
+
+#[test]
+fn check_16_4() { check_sorting_with_sizes(16, 16, 4); }
+
+#[test]
+fn check_64_4() { check_sorting_with_sizes(64, 64, 4); }
+
+#[test]
+fn check_20_4() { check_sorting_with_sizes(20, 20, 4); }
+
+#[test]
+fn check_64_8() { check_sorting_with_sizes(64, 4, 8); }
